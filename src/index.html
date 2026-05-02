@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Classic Radio</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <section class="player-card">
+      <div id="titleDragRegion" class="title-row">
+        <h1><i class="fa-solid fa-radio"></i> Classic Radio</h1>
+        <button id="manageToggle" class="icon-button" title="Manage stations">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+        <button id="minimizeBtn" class="window-button" title="Minimize">
+          <i class="fa-solid fa-minus"></i>
+        </button>
+        <button id="closeBtn" class="window-button" title="Close to tray">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="source-select">
+        <label><input type="radio" name="source" value="1" checked> Indonesia</label>
+        <label><input type="radio" name="source" value="2"> Luar Negri</label>
+      </div>
+
+      <div id="stationSelect" class="station-select">
+        <button id="stationSelectButton" class="station-select-button" type="button">
+          <span id="stationSelectLabel"></span>
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+        <div id="stationMenu" class="station-menu" hidden></div>
+      </div>
+
+      <div class="controls">
+        <button id="prevBtn" title="Previous"><i class="fas fa-backward-step"></i></button>
+        <button id="playBtn" class="primary-play-button" title="Play"><i class="fas fa-play"></i></button>
+        <button id="nextBtn" title="Next"><i class="fas fa-forward-step"></i></button>
+        <button id="muteBtn" title="Mute"><i class="fas fa-volume-up"></i></button>
+        <div class="volume-control">
+          <input type="range" id="volume" min="0" max="1" step="0.01" value="1" />
+          <span id="volumePercent">100%</span>
+        </div>
+      </div>
+
+      <canvas id="visualizer"></canvas>
+      <p id="status">Select a station to play</p>
+    </section>
+  </main>
+
+  <audio id="radio" crossorigin="anonymous"></audio>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

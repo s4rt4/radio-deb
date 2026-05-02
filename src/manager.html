@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kelola Stasiun</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="manager-body">
+  <section class="manager-window">
+    <div id="managerTitleDragRegion" class="panel-header">
+      <h2>Kelola Stasiun</h2>
+      <div class="panel-actions">
+        <button id="resetStationsBtn" class="text-button" type="button">Reset</button>
+        <button id="closeManagerBtn" class="window-button" type="button" title="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="source-select manager-source">
+      <label><input type="radio" name="source" value="1" checked> Indonesia</label>
+      <label><input type="radio" name="source" value="2"> Luar Negri</label>
+    </div>
+
+    <form id="stationForm" class="station-form">
+      <input type="hidden" id="stationIndex" />
+      <label>
+        Nama
+        <input id="stationName" type="text" required placeholder="Nama stasiun" />
+      </label>
+      <label>
+        URL Streaming
+        <input id="stationUrl" type="url" required placeholder="https://..." />
+      </label>
+      <label>
+        Negara
+        <input id="stationCountry" type="text" placeholder="Indonesia" />
+      </label>
+      <div class="form-actions">
+        <button id="cancelEditBtn" class="text-button" type="button">Batal</button>
+        <button class="primary-button" type="submit">Simpan</button>
+      </div>
+    </form>
+
+    <div id="stationList" class="station-list"></div>
+  </section>
+
+  <script type="module" src="/manager.js"></script>
+</body>
+</html>
