@@ -105,7 +105,8 @@ h1 {
   text-align: left;
 }
 
-h1 .fa-radio {
+h1 .fa-radio,
+.app-mark {
   border: 1px solid rgba(255, 212, 0, 0.6);
   border-radius: 10px;
   box-sizing: border-box;
@@ -117,12 +118,38 @@ h1 .fa-radio {
   width: 36px;
 }
 
+.ui-icon {
+  align-items: center;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-width: 16px;
+}
+
+.icon-star::before { content: "*"; }
+.icon-mini::before { content: "[]"; }
+.icon-gear::before { content: "SET"; font-size: 9px; }
+.icon-minus::before { content: "-"; font-size: 18px; }
+.icon-close::before { content: "x"; font-size: 16px; }
+.icon-chevron::before { content: "v"; }
+.icon-prev::before { content: "<<"; }
+.icon-play::before { content: ">"; padding-left: 2px; }
+.icon-pause::before { content: "||"; }
+.icon-next::before { content: ">>"; }
+.icon-volume::before { content: "VOL"; font-size: 10px; }
+.icon-muted::before { content: "MUT"; font-size: 10px; }
+.icon-edit::before { content: "ED"; font-size: 10px; }
+.icon-delete::before { content: "DEL"; font-size: 9px; }
+
 h2 {
   font-size: 22px;
 }
 
 .source-select {
   display: flex;
+  flex-wrap: wrap;
   gap: 20px;
   justify-content: center;
   margin: 14px 20px 10px;
@@ -134,6 +161,21 @@ h2 {
   display: inline-flex;
   font-size: 18px;
   gap: 8px;
+}
+
+.source-filter {
+  background: transparent;
+  border: 1px solid rgba(255, 212, 0, 0.7);
+  border-radius: 8px;
+  color: var(--gold);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 10px;
+}
+
+.source-filter.is-active {
+  background: var(--gold);
+  color: var(--panel-dark);
 }
 
 .station-select {
@@ -243,7 +285,8 @@ h2 {
 .controls button:hover,
 .icon-button:hover,
 .window-button:hover,
-.row-actions button:hover {
+.row-actions button:hover,
+.icon-button.is-active {
   background: var(--gold);
   color: var(--panel);
   transform: scale(1.05);
@@ -342,6 +385,15 @@ input[type="range"]::-moz-range-thumb {
   margin: 12px 20px 18px;
 }
 
+#status[data-state="error"] {
+  color: #ffb0a5;
+}
+
+#status[data-state="loading"],
+#status[data-state="offline"] {
+  color: #ffe9a8;
+}
+
 .manager-panel {
   left: 50%;
   padding: 20px;
@@ -363,12 +415,20 @@ input[type="range"]::-moz-range-thumb {
 .panel-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .station-form {
   display: grid;
   gap: 10px;
+}
+
+.form-mode {
+  color: var(--gold);
+  font-size: 14px;
+  margin: 0;
 }
 
 .station-form label {
@@ -390,8 +450,15 @@ input[type="range"]::-moz-range-thumb {
   color: #cdbb8b;
 }
 
+.form-error {
+  color: #ffb0a5;
+  font-size: 13px;
+  margin: 0;
+}
+
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
 }
@@ -467,17 +534,30 @@ input[type="range"]::-moz-range-thumb {
   width: 34px;
 }
 
-.controls button .fas {
-  position: relative;
-  bottom: 1px;
-}
-
-#playBtn .fa-play {
-  left: 2px;
-}
-
 input[type="radio"]:checked {
   accent-color: var(--gold);
+}
+
+.mini-mode .source-select,
+.mini-mode .station-select,
+.mini-mode #visualizer,
+.mini-mode .volume-control,
+.mini-mode #status,
+.mini-mode #manageToggle {
+  display: none;
+}
+
+.mini-mode .app-shell {
+  max-width: 390px;
+  min-height: auto;
+}
+
+.mini-mode .player-card {
+  grid-template-rows: auto auto;
+}
+
+.mini-mode .controls {
+  margin-top: 18px;
 }
 
 @media (max-width: 620px) {
@@ -500,7 +580,8 @@ input[type="radio"]:checked {
     font-size: 25px;
   }
 
-  h1 .fa-radio {
+  h1 .fa-radio,
+  .app-mark {
     height: 36px;
     width: 36px;
   }

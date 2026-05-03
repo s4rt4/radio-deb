@@ -1,7 +1,14 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { loadStoredStations } from "./station-store.js";
+import Hls from "hls.js";
+import {
+  loadFavorites,
+  loadPreferences,
+  loadStoredStations,
+  persistFavorites,
+  persistPreferences,
+} from "./station-store.js";
 
 const stationSelect = document.getElementById("stationSelect");
 const stationSelectButton = document.getElementById("stationSelectButton");
@@ -18,14 +25,19 @@ const nextBtn = document.getElementById("nextBtn");
 const muteBtn = document.getElementById("muteBtn");
 const volumeSlider = document.getElementById("volume");
 const volumePercent = document.getElementById("volumePercent");
+const favoritesFilterBtn = document.getElementById("favoritesFilterBtn");
 const manageToggle = document.getElementById("manageToggle");
+const favoriteBtn = document.getElementById("favoriteBtn");
+const miniModeBtn = document.getElementById("miniModeBtn");
 const minimizeBtn = document.getElementById("minimizeBtn");
 const closeBtn = document.getElementById("closeBtn");
 const titleDragRegion = document.getElementById("titleDragRegion");
 const appWindow = getCurrentWindow();
 
 let stations = loadStoredStations();
-let currentSource = "1";
+let preferences = loadPreferences();
+let favorites = loadFavorites();
+let currentSource = preferences.source;
 let audioCtx;
 let analyser;
 let source;
@@ -39,9 +51,37 @@ let currentStreamUrl = "";
 let wantsPlayback = false;
 let reconnectTimer;
 let reconnectAttempt = 0;
+let favoritesOnly = false;
 
 function currentStations() {
-  return stations[currentSource] || [];
+  const list = stations[currentSource] || [];
+  if (!favoritesOnly) return list;
+  return list.filter((station) => favorites.includes(station.url));
+}
+
+function savePreferences(overrides = {}) {
+  preferences = {
+    ...preferences,
+    source: currentSource,
+    stationUrl: selectedStation()?.url || preferences.stationUrl,
+    volume: Number(volumeSlider.value),
+    muted: audio.muted,
+    ...overrides,
+  };
+  persistPreferences(preferences);
+}
+
+function setStatus(message, state = "idle") {
+  statusText.textContent = message;
+  statusText.dataset.state = state;
+}
+
+function emitPlayerState() {
+  const station = selectedStation();
+  emit("player-state", {
+    playing: wantsPlayback && !audio.paused,
+    stationName: station?.name || "",
+  });
 }
 
 function loadStations() {
@@ -75,6 +115,8 @@ function loadStations() {
   const restoredIndex = list.findIndex((station) => station.url === selectedUrl);
   selectedStationIndex = restoredIndex >= 0 ? restoredIndex : 0;
   updateStationSelectLabel();
+  updateFavoriteButton();
+  savePreferences();
 }
 
 function createStationMenuItem(station, index) {
@@ -86,6 +128,8 @@ function createStationMenuItem(station, index) {
   item.addEventListener("click", () => {
     selectedStationIndex = index;
     updateStationSelectLabel();
+    updateFavoriteButton();
+    savePreferences();
     closeStationMenu();
   });
   return item;
@@ -101,6 +145,8 @@ function updateStationSelectLabel() {
   stationMenu.querySelectorAll(".station-menu-item").forEach((item) => {
     item.classList.toggle("is-selected", Number(item.dataset.index) === selectedStationIndex);
   });
+  updateFavoriteButton();
+  emitPlayerState();
 }
 
 function selectedStationName() {
@@ -110,31 +156,35 @@ function selectedStationName() {
 function playSelectedStation() {
   const url = selectedStation()?.url;
   if (!url) {
-    statusText.textContent = "Tidak ada stasiun untuk diputar.";
+    setStatus("Tidak ada stasiun untuk diputar.", "error");
     return;
   }
 
   wantsPlayback = true;
   clearReconnect();
   initVisualizer();
-  prepareStream(url);
+  if (!prepareStream(url)) return;
+  setStatus("Loading: " + selectedStationName(), "loading");
+  updatePlayPauseButton();
 
   audio.play()
     .then(() => {
       reconnectAttempt = 0;
-      statusText.textContent = "Now Playing: " + selectedStationName();
+      setStatus("Now Playing: " + selectedStationName(), "playing");
       if (audioCtx?.state === "suspended") audioCtx.resume();
       updatePlayPauseButton();
+      emitPlayerState();
+      savePreferences();
     })
     .catch((error) => {
       console.error("Play error:", error);
-      statusText.textContent = "Error playing station.";
+      setStatus("Playback blocked or stream failed: " + selectedStationName(), "error");
       scheduleReconnect("play-error");
     });
 }
 
 function prepareStream(url, forceReload = false) {
-  if (!forceReload && currentStreamUrl === url) return;
+  if (!forceReload && currentStreamUrl === url) return true;
 
   currentStreamUrl = url;
 
@@ -143,22 +193,31 @@ function prepareStream(url, forceReload = false) {
     hls = null;
   }
 
-  if (window.Hls?.isSupported() && url.endsWith(".m3u8")) {
-    hls = new window.Hls({
+  const isHlsStream = url.toLowerCase().includes(".m3u8");
+  if (Hls.isSupported() && isHlsStream) {
+    hls = new Hls({
       enableWorker: true,
       lowLatencyMode: false,
       backBufferLength: 30,
     });
-    hls.on(window.Hls.Events.ERROR, (_event, data) => {
+    hls.on(Hls.Events.ERROR, (_event, data) => {
       console.warn("HLS error:", data);
       if (data.fatal) scheduleReconnect("hls-error");
     });
     hls.loadSource(url);
     hls.attachMedia(audio);
+  } else if (isHlsStream && !audio.canPlayType("application/vnd.apple.mpegurl")) {
+    setStatus("HLS stream tidak didukung oleh runtime ini.", "error");
+    wantsPlayback = false;
+    updatePlayPauseButton();
+    emitPlayerState();
+    return false;
   } else {
     audio.src = url;
     audio.load();
   }
+
+  return true;
 }
 
 function changeStation(direction) {
@@ -172,6 +231,7 @@ function changeStation(direction) {
 
   selectedStationIndex = currentIndex;
   updateStationSelectLabel();
+  savePreferences();
   currentStreamUrl = "";
   playSelectedStation();
 }
@@ -183,8 +243,9 @@ function togglePlayPause() {
     wantsPlayback = false;
     clearReconnect();
     audio.pause();
-    statusText.textContent = "Paused";
+    setStatus("Paused: " + selectedStationName(), "paused");
     updatePlayPauseButton();
+    emitPlayerState();
   }
 }
 
@@ -205,12 +266,14 @@ document.querySelectorAll("input[name='source']").forEach((radio) => {
     currentSource = event.target.value;
     selectedStationIndex = 0;
     loadStations();
-    statusText.textContent = "Source changed. Select a station to play.";
+    setStatus("Source changed. Select a station to play.", "idle");
     wantsPlayback = false;
     clearReconnect();
     currentStreamUrl = "";
     audio.pause();
     updatePlayPauseButton();
+    emitPlayerState();
+    savePreferences({ stationUrl: selectedStation()?.url || "" });
   });
 });
 
@@ -234,6 +297,7 @@ volumeSlider.addEventListener("input", (event) => {
     setOutputVolume(0);
     updateMuteIcon(true);
   }
+  savePreferences({ volume, muted: audio.muted });
 });
 
 muteBtn.addEventListener("click", () => {
@@ -243,7 +307,7 @@ muteBtn.addEventListener("click", () => {
     volumeSlider.value = String(lastAudibleVolume);
     updateVolumePercent(lastAudibleVolume);
     updateMuteIcon(false);
-    statusText.textContent = "Unmuted";
+    setStatus("Unmuted", "idle");
   } else {
     lastAudibleVolume = audio.volume || lastAudibleVolume;
     audio.muted = true;
@@ -251,8 +315,9 @@ muteBtn.addEventListener("click", () => {
     volumeSlider.value = "0";
     updateVolumePercent(0);
     updateMuteIcon(true);
-    statusText.textContent = "Muted";
+    setStatus("Muted", "idle");
   }
+  savePreferences({ volume: Number(volumeSlider.value), muted: audio.muted });
 });
 
 function setOutputVolume(volume) {
@@ -261,9 +326,10 @@ function setOutputVolume(volume) {
 }
 
 function updateMuteIcon(isMuted) {
-  const icon = muteBtn.querySelector("i");
-  icon.classList.toggle("fa-volume-up", !isMuted);
-  icon.classList.toggle("fa-volume-mute", isMuted);
+  const icon = muteBtn.querySelector(".ui-icon");
+  icon.classList.toggle("icon-volume", !isMuted);
+  icon.classList.toggle("icon-muted", isMuted);
+  muteBtn.title = isMuted ? "Unmute" : "Mute";
 }
 
 function updateVolumePercent(volume = Number(volumeSlider.value)) {
@@ -273,14 +339,45 @@ function updateVolumePercent(volume = Number(volumeSlider.value)) {
 
 function updatePlayPauseButton() {
   const isStreaming = wantsPlayback && !audio.paused;
-  const icon = playBtn.querySelector("i");
-  icon.classList.toggle("fa-play", !isStreaming);
-  icon.classList.toggle("fa-pause", isStreaming);
+  const icon = playBtn.querySelector(".ui-icon");
+  icon.classList.toggle("icon-play", !isStreaming);
+  icon.classList.toggle("icon-pause", isStreaming);
   playBtn.title = isStreaming ? "Pause" : "Play";
+  emitPlayerState();
 }
 
 manageToggle.addEventListener("click", () => {
   openStationManager();
+});
+
+favoriteBtn.addEventListener("click", () => {
+  const url = selectedStation()?.url;
+  if (!url) return;
+
+  if (favorites.includes(url)) {
+    favorites = favorites.filter((favoriteUrl) => favoriteUrl !== url);
+  } else {
+    favorites.push(url);
+  }
+
+  persistFavorites(favorites);
+  updateFavoriteButton();
+  if (favoritesOnly) loadStations();
+});
+
+favoritesFilterBtn.addEventListener("click", () => {
+  favoritesOnly = !favoritesOnly;
+  favoritesFilterBtn.classList.toggle("is-active", favoritesOnly);
+  favoritesFilterBtn.setAttribute("aria-pressed", String(favoritesOnly));
+  selectedStationIndex = 0;
+  loadStations();
+  setStatus(favoritesOnly ? "Showing favorite stations." : "Showing all stations.", "idle");
+});
+
+miniModeBtn.addEventListener("click", () => {
+  const enabled = !document.body.classList.contains("mini-mode");
+  setMiniMode(enabled);
+  savePreferences({ miniMode: enabled });
 });
 
 titleDragRegion.addEventListener("mousedown", (event) => {
@@ -300,6 +397,20 @@ document.addEventListener("click", (event) => {
 function closeStationMenu() {
   stationMenu.hidden = true;
   stationSelect.classList.remove("is-open");
+}
+
+function updateFavoriteButton() {
+  const isFavorite = favorites.includes(selectedStation()?.url);
+  favoriteBtn.classList.toggle("is-active", isFavorite);
+  favoriteBtn.setAttribute("aria-pressed", String(isFavorite));
+  favoriteBtn.title = isFavorite ? "Remove favorite" : "Favorite station";
+}
+
+function setMiniMode(enabled) {
+  document.body.classList.toggle("mini-mode", enabled);
+  miniModeBtn.classList.toggle("is-active", enabled);
+  miniModeBtn.setAttribute("aria-pressed", String(enabled));
+  miniModeBtn.title = enabled ? "Full mode" : "Mini mode";
 }
 
 minimizeBtn.addEventListener("click", () => {
@@ -396,26 +507,38 @@ listen("stations-updated", () => {
 
 audio.addEventListener("playing", () => {
   reconnectAttempt = 0;
+  setStatus("Now Playing: " + selectedStationName(), "playing");
   updatePlayPauseButton();
+  emitPlayerState();
 });
 
-audio.addEventListener("pause", updatePlayPauseButton);
+audio.addEventListener("pause", () => {
+  updatePlayPauseButton();
+  emitPlayerState();
+});
 audio.addEventListener("ended", () => {
   if (wantsPlayback) scheduleReconnect("ended");
 });
 audio.addEventListener("error", () => {
-  if (wantsPlayback) scheduleReconnect("audio-error");
+  if (wantsPlayback) {
+    setStatus("Stream error: " + selectedStationName(), "error");
+    scheduleReconnect("audio-error");
+  }
 });
 audio.addEventListener("stalled", () => {
-  if (wantsPlayback) scheduleReconnect("stalled");
+  if (wantsPlayback) {
+    setStatus("Stream stalled: " + selectedStationName(), "loading");
+    scheduleReconnect("stalled");
+  }
 });
 audio.addEventListener("waiting", () => {
+  if (wantsPlayback) setStatus("Buffering: " + selectedStationName(), "loading");
   if (wantsPlayback && !navigator.onLine) scheduleReconnect("offline-waiting");
 });
 
 window.addEventListener("offline", () => {
   if (!wantsPlayback) return;
-  statusText.textContent = "Offline. Reconnecting when internet returns...";
+  setStatus("Offline. Reconnecting when internet returns...", "offline");
   scheduleReconnect("offline");
 });
 
@@ -433,9 +556,9 @@ function scheduleReconnect(reason) {
     ? Math.min(15000, 1000 * 2 ** Math.min(reconnectAttempt, 4))
     : 3000;
   reconnectAttempt += 1;
-  statusText.textContent = navigator.onLine
+  setStatus(navigator.onLine
     ? `Reconnecting... (${reason})`
-    : "Offline. Waiting for connection...";
+    : "Offline. Waiting for connection...", navigator.onLine ? "loading" : "offline");
 
   reconnectTimer = setTimeout(() => reconnectNow(reason), delay);
 }
@@ -446,12 +569,13 @@ function reconnectNow(reason) {
   if (!url) return;
 
   console.info("Reconnecting stream:", reason);
-  prepareStream(url, true);
+  if (!prepareStream(url, true)) return;
   audio.play()
     .then(() => {
       reconnectAttempt = 0;
-      statusText.textContent = "Now Playing: " + selectedStationName();
+      setStatus("Now Playing: " + selectedStationName(), "playing");
       updatePlayPauseButton();
+      emitPlayerState();
     })
     .catch((error) => {
       console.warn("Reconnect failed:", error);
@@ -464,6 +588,49 @@ function clearReconnect() {
   reconnectTimer = null;
 }
 
+function applyInitialPreferences() {
+  document.querySelectorAll("input[name='source']").forEach((radio) => {
+    radio.checked = radio.value === currentSource;
+  });
+
+  const savedIndex = (stations[currentSource] || [])
+    .findIndex((station) => station.url === preferences.stationUrl);
+  selectedStationIndex = savedIndex >= 0 ? savedIndex : 0;
+
+  volumeSlider.value = String(preferences.volume);
+  setOutputVolume(preferences.volume);
+  audio.muted = preferences.muted;
+  if (!preferences.muted && preferences.volume > 0) {
+    lastAudibleVolume = preferences.volume;
+  }
+  updateMuteIcon(audio.muted || preferences.volume === 0);
+  setMiniMode(preferences.miniMode);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.closest("input, textarea, select")) return;
+
+  if (event.key === " ") {
+    event.preventDefault();
+    togglePlayPause();
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    changeStation("next");
+  } else if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    changeStation("prev");
+  } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    event.preventDefault();
+    const delta = event.key === "ArrowUp" ? 0.05 : -0.05;
+    const volume = Math.min(1, Math.max(0, Number(volumeSlider.value) + delta));
+    volumeSlider.value = String(volume);
+    volumeSlider.dispatchEvent(new Event("input"));
+  } else if (event.key === "Escape") {
+    closeStationMenu();
+  }
+});
+
+applyInitialPreferences();
 loadStations();
 updateVolumePercent();
 updatePlayPauseButton();

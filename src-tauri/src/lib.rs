@@ -1,9 +1,17 @@
+use serde::Deserialize;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Emitter, Listener, Manager, WindowEvent,
 };
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerState {
+    playing: bool,
+    station_name: String,
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -30,7 +38,7 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &hide, &play_pause, &previous, &next, &exit])?;
 
-    TrayIconBuilder::with_id("main-tray")
+    let tray = TrayIconBuilder::with_id("main-tray")
         .icon(Image::from_bytes(include_bytes!("../icons/icon.png"))?)
         .tooltip("Classic Radio")
         .menu(&menu)
@@ -75,6 +83,22 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
             _ => {}
         })
         .build(app)?;
+
+    let play_pause_for_state = play_pause.clone();
+    let tray_for_state = tray.clone();
+    app.listen("player-state", move |event| {
+        if let Ok(state) = serde_json::from_str::<PlayerState>(event.payload()) {
+            let label = if state.playing { "Pause" } else { "Play" };
+            let tooltip = if state.station_name.is_empty() {
+                "Classic Radio".to_string()
+            } else {
+                format!("Classic Radio - {}", state.station_name)
+            };
+
+            let _ = play_pause_for_state.set_text(label);
+            let _ = tray_for_state.set_tooltip(Some(tooltip));
+        }
+    });
 
     Ok(())
 }

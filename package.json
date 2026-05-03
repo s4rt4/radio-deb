@@ -1,17 +1,21 @@
 {
   "name": "classic-radio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "test": "node --test",
+    "check": "npm run test && npm run build && cargo check --manifest-path src-tauri/Cargo.toml",
+    "format": "cargo fmt --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "deb": "tauri build --bundles deb"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0"
+    "@tauri-apps/api": "^2.0.0",
+    "hls.js": "^1.6.16"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

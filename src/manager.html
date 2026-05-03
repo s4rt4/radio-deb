@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kelola Stasiun</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="manager-body">
   <section class="manager-window">
     <div id="managerTitleDragRegion" class="panel-header">
       <h2>Kelola Stasiun</h2>
       <div class="panel-actions">
+        <button id="importStationsBtn" class="text-button" type="button">Import</button>
+        <button id="exportStationsBtn" class="text-button" type="button">Export</button>
         <button id="resetStationsBtn" class="text-button" type="button">Reset</button>
         <button id="closeManagerBtn" class="window-button" type="button" title="Close">
-          <i class="fa-solid fa-xmark"></i>
+          <span class="ui-icon icon-close" aria-hidden="true"></span>
         </button>
       </div>
     </div>
@@ -26,6 +27,7 @@
 
     <form id="stationForm" class="station-form">
       <input type="hidden" id="stationIndex" />
+      <p id="editModeLabel" class="form-mode">Tambah stasiun baru</p>
       <label>
         Nama
         <input id="stationName" type="text" required placeholder="Nama stasiun" />
@@ -38,13 +40,16 @@
         Negara
         <input id="stationCountry" type="text" placeholder="Indonesia" />
       </label>
+      <p id="formError" class="form-error" role="alert" hidden></p>
       <div class="form-actions">
+        <button id="testStreamBtn" class="text-button" type="button">Test stream</button>
         <button id="cancelEditBtn" class="text-button" type="button">Batal</button>
         <button class="primary-button" type="submit">Simpan</button>
       </div>
     </form>
 
     <div id="stationList" class="station-list"></div>
+    <input id="importStationsInput" type="file" accept="application/json,.json" hidden />
   </section>
 
   <script type="module" src="/manager.js"></script>

@@ -1,6 +1,12 @@
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { defaultStations, loadStoredStations, persistStations } from "./station-store.js";
+import {
+  defaultStations,
+  loadStoredStations,
+  normalizeStationGroups,
+  persistStations,
+  validateStation,
+} from "./station-store.js";
 
 const appWindow = getCurrentWindow();
 const titleDragRegion = document.getElementById("managerTitleDragRegion");
@@ -13,17 +19,36 @@ const stationCountryInput = document.getElementById("stationCountry");
 const stationList = document.getElementById("stationList");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
 const resetStationsBtn = document.getElementById("resetStationsBtn");
+const importStationsBtn = document.getElementById("importStationsBtn");
+const exportStationsBtn = document.getElementById("exportStationsBtn");
+const importStationsInput = document.getElementById("importStationsInput");
+const testStreamBtn = document.getElementById("testStreamBtn");
+const formError = document.getElementById("formError");
+const editModeLabel = document.getElementById("editModeLabel");
 
 let stations = loadStoredStations();
 let currentSource = "1";
+let testAudio;
 
 function currentStations() {
   return stations[currentSource] || [];
 }
 
 function saveAndNotify() {
+  sortStations();
   persistStations(stations);
   emit("stations-updated");
+}
+
+function sortStations() {
+  for (const source of ["1", "2"]) {
+    stations[source].sort((a, b) => a.name.localeCompare(b.name));
+  }
+}
+
+function showFormError(message) {
+  formError.textContent = message;
+  formError.hidden = !message;
 }
 
 function renderStationList() {
@@ -59,13 +84,13 @@ function renderStationList() {
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.title = "Edit";
-    editButton.innerHTML = '<i class="fa-solid fa-pen"></i>';
+    editButton.innerHTML = '<span class="ui-icon icon-edit" aria-hidden="true"></span>';
     editButton.addEventListener("click", () => startEditStation(index));
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.title = "Hapus";
-    deleteButton.innerHTML = '<i class="fa-solid fa-trash"></i>';
+    deleteButton.innerHTML = '<span class="ui-icon icon-delete" aria-hidden="true"></span>';
     deleteButton.addEventListener("click", () => deleteStation(index));
 
     actions.append(editButton, deleteButton);
@@ -82,17 +107,22 @@ function startEditStation(index) {
   stationNameInput.value = station.name;
   stationUrlInput.value = station.url;
   stationCountryInput.value = station.country || "";
+  editModeLabel.textContent = "Edit stasiun";
+  showFormError("");
   stationNameInput.focus();
 }
 
 function clearForm() {
   stationForm.reset();
   stationIndexInput.value = "";
+  editModeLabel.textContent = "Tambah stasiun baru";
+  showFormError("");
 }
 
 function deleteStation(index) {
   const list = currentStations();
   if (!list[index]) return;
+  if (!confirm(`Hapus stasiun "${list[index].name}"?`)) return;
 
   list.splice(index, 1);
   saveAndNotify();
@@ -118,13 +148,19 @@ stationForm.addEventListener("submit", (event) => {
     url: stationUrlInput.value.trim(),
     country: stationCountryInput.value.trim() || (currentSource === "1" ? "Indonesia" : "International"),
   };
+  const validation = validateStation(station);
 
-  if (!station.name || !station.url) return;
+  if (!validation.valid) {
+    showFormError(validation.message);
+    return;
+  }
+
+  showFormError("");
 
   if (index >= 0) {
-    list[index] = station;
+    list[index] = validation.station;
   } else {
-    list.push(station);
+    list.push(validation.station);
   }
 
   saveAndNotify();
@@ -134,10 +170,84 @@ stationForm.addEventListener("submit", (event) => {
 
 cancelEditBtn.addEventListener("click", clearForm);
 resetStationsBtn.addEventListener("click", () => {
+  if (!confirm("Reset semua stasiun ke data bawaan?")) return;
   stations = defaultStations();
   saveAndNotify();
   clearForm();
   renderStationList();
+});
+
+testStreamBtn.addEventListener("click", () => {
+  const validation = validateStation({
+    name: stationNameInput.value.trim() || "Test stream",
+    url: stationUrlInput.value.trim(),
+    country: stationCountryInput.value.trim(),
+  });
+
+  if (!validation.valid) {
+    showFormError(validation.message);
+    return;
+  }
+
+  if (testAudio) {
+    testAudio.pause();
+    testAudio.src = "";
+  }
+
+  showFormError("Testing stream...");
+  testAudio = new Audio(validation.station.url);
+  testAudio.crossOrigin = "anonymous";
+  testAudio.volume = 0;
+  testAudio.addEventListener("canplay", () => {
+    showFormError("Stream bisa dibuka.");
+    testAudio.pause();
+  }, { once: true });
+  testAudio.addEventListener("error", () => {
+    showFormError("Stream tidak bisa dibuka dari runtime ini.");
+  }, { once: true });
+  testAudio.play().catch(() => {
+    showFormError("Stream tidak bisa diputar otomatis, tetapi URL valid.");
+  });
+});
+
+exportStationsBtn.addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(stations, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "classic-radio-stations.json";
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+
+importStationsBtn.addEventListener("click", () => {
+  importStationsInput.click();
+});
+
+importStationsInput.addEventListener("change", () => {
+  const [file] = importStationsInput.files;
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    try {
+      const imported = normalizeStationGroups(JSON.parse(reader.result));
+      if (!imported) {
+        showFormError("File import harus berisi source 1 dan 2 dengan station valid.");
+        return;
+      }
+
+      if (!confirm("Import akan mengganti semua daftar stasiun. Lanjutkan?")) return;
+      stations = imported;
+      saveAndNotify();
+      clearForm();
+      renderStationList();
+    } catch {
+      showFormError("File import bukan JSON valid.");
+    } finally {
+      importStationsInput.value = "";
+    }
+  });
+  reader.readAsText(file);
 });
 
 closeManagerBtn.addEventListener("click", () => {
@@ -149,4 +259,5 @@ titleDragRegion.addEventListener("mousedown", (event) => {
   appWindow.startDragging();
 });
 
+sortStations();
 renderStationList();
