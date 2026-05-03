@@ -1,7 +1,8 @@
 import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import Hls from "hls.js";
+import { hydrateIcons, updateIcon } from "./icons.js";
 import {
   loadFavorites,
   loadPreferences,
@@ -131,6 +132,8 @@ function createStationMenuItem(station, index) {
     updateFavoriteButton();
     savePreferences();
     closeStationMenu();
+    currentStreamUrl = "";
+    playSelectedStation();
   });
   return item;
 }
@@ -327,8 +330,7 @@ function setOutputVolume(volume) {
 
 function updateMuteIcon(isMuted) {
   const icon = muteBtn.querySelector(".ui-icon");
-  icon.classList.toggle("icon-volume", !isMuted);
-  icon.classList.toggle("icon-muted", isMuted);
+  updateIcon(icon, isMuted ? "icon-muted" : "icon-volume");
   muteBtn.title = isMuted ? "Unmute" : "Mute";
 }
 
@@ -340,8 +342,7 @@ function updateVolumePercent(volume = Number(volumeSlider.value)) {
 function updatePlayPauseButton() {
   const isStreaming = wantsPlayback && !audio.paused;
   const icon = playBtn.querySelector(".ui-icon");
-  icon.classList.toggle("icon-play", !isStreaming);
-  icon.classList.toggle("icon-pause", isStreaming);
+  updateIcon(icon, isStreaming ? "icon-pause" : "icon-play");
   playBtn.title = isStreaming ? "Pause" : "Play";
   emitPlayerState();
 }
@@ -411,6 +412,18 @@ function setMiniMode(enabled) {
   miniModeBtn.classList.toggle("is-active", enabled);
   miniModeBtn.setAttribute("aria-pressed", String(enabled));
   miniModeBtn.title = enabled ? "Full mode" : "Mini mode";
+  resizeForMode(enabled);
+}
+
+async function resizeForMode(enabled) {
+  const size = enabled ? new LogicalSize(292, 132) : new LogicalSize(430, 560);
+
+  try {
+    await appWindow.setMinSize(enabled ? new LogicalSize(292, 132) : new LogicalSize(390, 520));
+    await appWindow.setSize(size);
+  } catch (error) {
+    console.warn("Failed to resize window for mode:", error);
+  }
 }
 
 minimizeBtn.addEventListener("click", () => {
@@ -630,6 +643,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+hydrateIcons();
 applyInitialPreferences();
 loadStations();
 updateVolumePercent();

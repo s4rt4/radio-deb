@@ -1,5 +1,6 @@
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { hydrateIcons } from "./icons.js";
 import {
   defaultStations,
   loadStoredStations,
@@ -84,13 +85,13 @@ function renderStationList() {
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.title = "Edit";
-    editButton.innerHTML = '<span class="ui-icon icon-edit" aria-hidden="true"></span>';
+    editButton.innerHTML = '<span class="ui-icon icon-edit" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" /><path d="m14 7 3 3" /></svg></span>';
     editButton.addEventListener("click", () => startEditStation(index));
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.title = "Hapus";
-    deleteButton.innerHTML = '<span class="ui-icon icon-delete" aria-hidden="true"></span>';
+    deleteButton.innerHTML = '<span class="ui-icon icon-delete" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 7h14M10 11v6M14 11v6M8 7l1-3h6l1 3M7 7l1 13h8l1-13" /></svg></span>';
     deleteButton.addEventListener("click", () => deleteStation(index));
 
     actions.append(editButton, deleteButton);
@@ -259,5 +260,6 @@ titleDragRegion.addEventListener("mousedown", (event) => {
   appWindow.startDragging();
 });
 
+hydrateIcons();
 sortStations();
 renderStationList();

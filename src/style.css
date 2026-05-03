@@ -11,6 +11,7 @@
 html,
 body {
   min-height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -79,7 +80,7 @@ input {
 .panel-header {
   align-items: center;
   display: flex;
-  gap: 16px;
+  gap: 10px;
 }
 
 .title-row {
@@ -99,8 +100,9 @@ h1 {
   align-items: center;
   display: flex;
   flex: 1 1 auto;
-  font-size: 27px;
+  font-size: 14px;
   gap: 10px;
+  line-height: 1.15;
   min-width: 0;
   text-align: left;
 }
@@ -121,27 +123,42 @@ h1 .fa-radio,
 .ui-icon {
   align-items: center;
   display: inline-flex;
-  font-size: 13px;
-  font-weight: 700;
+  height: 18px;
   justify-content: center;
   line-height: 1;
-  min-width: 16px;
+  width: 18px;
 }
 
-.icon-star::before { content: "*"; }
-.icon-mini::before { content: "[]"; }
-.icon-gear::before { content: "SET"; font-size: 9px; }
-.icon-minus::before { content: "-"; font-size: 18px; }
-.icon-close::before { content: "x"; font-size: 16px; }
-.icon-chevron::before { content: "v"; }
-.icon-prev::before { content: "<<"; }
-.icon-play::before { content: ">"; padding-left: 2px; }
-.icon-pause::before { content: "||"; }
-.icon-next::before { content: ">>"; }
-.icon-volume::before { content: "VOL"; font-size: 10px; }
-.icon-muted::before { content: "MUT"; font-size: 10px; }
-.icon-edit::before { content: "ED"; font-size: 10px; }
-.icon-delete::before { content: "DEL"; font-size: 9px; }
+.ui-icon svg {
+  display: block;
+  fill: none;
+  height: 100%;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 100%;
+}
+
+.icon-star svg,
+.icon-play svg {
+  fill: currentColor;
+}
+
+.icon-chevron {
+  height: 16px;
+  width: 16px;
+}
+
+.controls .ui-icon {
+  height: 21px;
+  width: 21px;
+}
+
+.controls .primary-play-button .ui-icon {
+  height: 27px;
+  width: 27px;
+}
 
 h2 {
   font-size: 22px;
@@ -301,6 +318,12 @@ h2 {
   font-size: 16px;
   height: 34px;
   width: 34px;
+}
+
+.title-row .icon-button,
+.title-row .window-button {
+  height: 32px;
+  width: 32px;
 }
 
 .window-button {
@@ -548,16 +571,40 @@ input[type="radio"]:checked {
 }
 
 .mini-mode .app-shell {
-  max-width: 390px;
-  min-height: auto;
+  align-items: flex-start;
+  max-width: 292px;
+  min-height: 0;
+  padding: 0 0 10px;
 }
 
 .mini-mode .player-card {
   grid-template-rows: auto auto;
+  max-width: none;
+  width: 292px;
+}
+
+.mini-mode .title-row {
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.mini-mode h1 {
+  font-size: 13px;
 }
 
 .mini-mode .controls {
-  margin-top: 18px;
+  gap: 8px;
+  margin: 12px 12px 14px;
+}
+
+.mini-mode .controls button {
+  height: 38px;
+  width: 38px;
+}
+
+.mini-mode .controls .primary-play-button {
+  height: 48px;
+  width: 48px;
 }
 
 @media (max-width: 620px) {
@@ -577,7 +624,7 @@ input[type="radio"]:checked {
   }
 
   h1 {
-    font-size: 25px;
+    font-size: 14px;
   }
 
   h1 .fa-radio,

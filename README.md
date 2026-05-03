@@ -22,10 +22,33 @@ Classic Radio adalah aplikasi radio streaming desktop untuk Debian berbasis Taur
 - CSP Tauri dibuat lebih ketat dibanding konfigurasi awal.
 - Target build Debian package `.deb`.
 
+## Screenshot
+
+### Full Mode
+
+![Classic Radio full mode](assets/full-mode.png)
+
+### Mini Mode
+
+![Classic Radio mini mode](assets/mini-mode.png)
+
+### Panel Preview
+
+![Classic Radio panel preview](assets/on-panel-preview.png)
+
+### Kelola Stasiun
+
+![Classic Radio station manager](assets/setting-window.png)
+
 ## Struktur
 
 ```text
 .
+├── assets/
+│   ├── full-mode.png
+│   ├── mini-mode.png
+│   ├── on-panel-preview.png
+│   └── setting-window.png
 ├── package.json
 ├── vite.config.js
 ├── src/
