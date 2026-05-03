@@ -1,4 +1,7 @@
+pub mod single_instance;
+
 use serde::Deserialize;
+use single_instance::{AcquireError, InstanceLock};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -14,8 +17,20 @@ struct PlayerState {
 }
 
 pub fn run() {
+    let lock = match InstanceLock::acquire("gui") {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("{error}");
+            if let AcquireError::AlreadyRunning { mode, pid } = &error {
+                show_already_running_dialog(mode, *pid);
+            }
+            std::process::exit(1);
+        }
+    };
+
     tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
+            app.manage(lock);
             create_tray(app)?;
             Ok(())
         })
@@ -27,6 +42,24 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Classic Radio");
+}
+
+fn show_already_running_dialog(mode: &str, pid: u32) {
+    let message = format!(
+        "Classic Radio sudah berjalan dalam mode {mode} (PID {pid}).\nTutup instance itu dulu sebelum menjalankan yang baru."
+    );
+    let _ = std::process::Command::new("zenity")
+        .args([
+            "--error",
+            "--title=Classic Radio",
+            &format!("--text={message}"),
+        ])
+        .status()
+        .or_else(|_| {
+            std::process::Command::new("notify-send")
+                .args(["Classic Radio", &message])
+                .status()
+        });
 }
 
 fn create_tray(app: &tauri::App) -> tauri::Result<()> {

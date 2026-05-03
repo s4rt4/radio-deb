@@ -4,6 +4,22 @@ Dokumen ini berisi saran task pengembangan berikutnya untuk Classic Radio, disus
 
 ## Prioritas Tinggi
 
+1. Single source of truth untuk daftar stasiun
+   - Saat ini default stasiun ada di dua tempat: `src/data/indonesia.js` + `src/data/international.js` (default GUI) dan `src-tauri/resources/stations.json` (data CLI).
+   - Risiko drift: update di satu tempat bisa lupa disinkronkan ke tempat lain.
+   - Pilihan: generate JS dari JSON saat build, atau load `stations.json` dari `resourceDir` di runtime GUI.
+   - Pastikan schema station konsisten antara CLI (`name, url, country, source`) dan GUI (`name, url, country`).
+
+6. Pindah persistensi user data dari `localStorage` ke file app-data Tauri
+   - Stasiun custom, preferensi, dan favorit sekarang disimpan di WebView `localStorage`.
+   - Untuk desktop app lebih eksplisit dan portable kalau disimpan ke `appDataDir` lewat `@tauri-apps/plugin-store` atau file JSON manual.
+   - Keuntungan: tidak hilang saat WebView storage di-clear, gampang di-backup, dan bisa dibaca oleh CLI nantinya.
+
+7. Tambah `bundle.linux.deb.depends` di `tauri.conf.json`
+   - Sekarang `depends: []` — instalasi `.deb` di sistem polos bisa crash karena library native belum ada.
+   - Minimal: `libwebkit2gtk-4.1-0`, `libayatana-appindicator3-1` untuk tray.
+   - Pertimbangkan juga menyarankan `mpv` sebagai `Recommends` untuk CLI playback (tidak `Depends` supaya pengguna GUI-only tetap bisa install tanpa mpv).
+
 
 2. Tambahkan validasi URL stasiun di manager
    - Cegah input URL kosong, format salah, atau protokol selain `http`/`https`.

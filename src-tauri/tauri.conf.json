@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Classic Radio",
-  "version": "0.2.0",
+  "mainBinaryName": "classic-radio",
+  "version": "0.3.1",
   "identifier": "id.sarta.classic-radio",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -43,7 +44,10 @@
     "longDescription": "Classic Radio is a Debian desktop radio streaming player with station management and system tray controls.",
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [],
+        "files": {
+          "usr/bin/classic-radio-cli": "target/release/classic-radio-cli"
+        }
       }
     }
   }

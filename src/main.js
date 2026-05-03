@@ -644,6 +644,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 hydrateIcons();
+const appVersionEl = document.getElementById("appVersion");
+if (appVersionEl) {
+  appVersionEl.textContent = `v${__APP_VERSION__}`;
+}
 applyInitialPreferences();
 loadStations();
 updateVolumePercent();

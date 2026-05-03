@@ -2,7 +2,11 @@
 
 Classic Radio adalah aplikasi radio streaming desktop untuk Debian berbasis Tauri. UI klasik coklat keemasan dari versi web dipertahankan, lalu ditambah fitur desktop seperti system tray, manajemen stasiun, favorit, dan mini mode.
 
+Package Debian juga menyertakan CLI opsional. Pengguna GUI tetap membuka aplikasi seperti biasa lewat launcher atau command `classic-radio`; versi terminal tersedia sebagai `classic-radio-cli`.
+
 ## Fitur
+
+### GUI Desktop
 
 - Streaming radio Indonesia dan internasional.
 - Dukungan stream umum seperti MP3, AAC, OGG, dan HLS `.m3u8` lewat `hls.js` lokal.
@@ -21,6 +25,49 @@ Classic Radio adalah aplikasi radio streaming desktop untuk Debian berbasis Taur
 - Dependency frontend dibundel lokal, tanpa CDN runtime untuk icon dan HLS.
 - CSP Tauri dibuat lebih ketat dibanding konfigurasi awal.
 - Target build Debian package `.deb`.
+- Versi aplikasi tampil di header GUI dan title bar CLI.
+
+### Single Instance Lock
+
+Hanya satu instance Classic Radio yang boleh berjalan, baik GUI maupun CLI. Mencoba membuka instance kedua akan ditolak dengan pesan jelas yang menyebut mode dan PID instance yang sudah berjalan, jadi audio tidak bertabrakan dan kontrol playback tetap konsisten. Lockfile disimpan di `$XDG_RUNTIME_DIR/classic-radio.lock` dan otomatis dibersihkan saat instance keluar (termasuk lockfile basi dari proses yang sudah mati).
+
+### CLI Terminal
+
+- Command terpisah: `classic-radio-cli`.
+- Tidak menggantikan GUI dan tidak mengubah command `classic-radio`.
+- Tampilan terminal interaktif dengan status now playing, volume, mute, source, dan paging stasiun.
+- Browse daftar stasiun bawaan, search, dan filter berdasarkan source (Indonesia/International).
+- Kontrol playback runtime lewat IPC ke `mpv`: pause/resume, mute, volume.
+- Animasi audio meter saat streaming, indikator pause `‖` saat di-pause.
+- UI berjalan di alternate screen buffer, jadi terminal kembali bersih saat keluar.
+- Playback CLI memakai `mpv`, jadi install `mpv` jika ingin memakai CLI:
+
+```bash
+sudo apt install mpv
+```
+
+Daftar command di dalam CLI:
+
+| Command | Aksi |
+| --- | --- |
+| `1`–`12` | Play stasiun di halaman ini |
+| `>` / `next-page` | Halaman stasiun berikutnya |
+| `<` / `prev-page` | Halaman stasiun sebelumnya |
+| `/<kata>` | Cari stasiun |
+| `all` | Tampilkan semua stasiun, reset filter |
+| `src1` / `id` | Filter source Indonesia |
+| `src2` / `intl` | Filter source International |
+| `src` | Reset filter source |
+| `p` / `pause` | Toggle pause/resume |
+| `m` / `mute` | Toggle mute/unmute |
+| `+` / `-` | Volume +/- 5 |
+| `v <0-100>` | Set volume |
+| `n` / `next` | Stasiun berikutnya, auto play |
+| `b` / `prev` | Stasiun sebelumnya, auto play |
+| `s` / `stop` | Hentikan playback |
+| `i` / `info` | Refresh tampilan |
+| `h` / `help` / `?` | Bantuan |
+| `q` / `quit` | Keluar |
 
 ## Screenshot
 
@@ -63,10 +110,14 @@ Classic Radio adalah aplikasi radio streaming desktop untuk Debian berbasis Taur
 │       ├── indonesia.js
 │       └── international.js
 ├── src-tauri/
+    ├── resources/
+    │   └── stations.json
     ├── Cargo.toml
     ├── tauri.conf.json
     ├── build.rs
     └── src/
+        ├── bin/
+        │   └── classic-radio-cli.rs
         ├── lib.rs
         └── main.rs
 └── docs/
@@ -95,6 +146,13 @@ Jalankan aplikasi desktop:
 npm run tauri:dev
 ```
 
+Jalankan CLI dari source:
+
+```bash
+npm run build:cli
+./src-tauri/target/debug/classic-radio-cli
+```
+
 Jalankan test, build frontend, dan `cargo check`:
 
 ```bash
@@ -113,10 +171,17 @@ File `.deb` akan dibuat di:
 src-tauri/target/release/bundle/deb/
 ```
 
-Untuk versi `0.2.0`, nama artefak yang dihasilkan:
+Untuk versi `0.3.1`, nama artefak yang dihasilkan:
 
 ```text
-Classic Radio_0.2.0_amd64.deb
+Classic Radio_0.3.1_amd64.deb
+```
+
+Setelah `.deb` di-install, command yang tersedia:
+
+```bash
+classic-radio      # GUI desktop
+classic-radio-cli  # CLI terminal opsional
 ```
 
 ## Catatan Debian
