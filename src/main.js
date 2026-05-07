@@ -52,7 +52,57 @@ let currentStreamUrl = "";
 let wantsPlayback = false;
 let reconnectTimer;
 let reconnectAttempt = 0;
+let reconnectInFlight = false;
 let favoritesOnly = false;
+let watchdogTimer;
+let lastProgressAt = 0;
+let lastProgressTime = 0;
+
+const DEBUG_LOG_KEY = "radio-debug-log";
+const DEBUG_LOG_MAX = 1000;
+const WATCHDOG_INTERVAL_MS = 5000;
+const STUCK_THRESHOLD_MS = 15000;
+
+let debugLogBuffer = [];
+try {
+  const saved = localStorage.getItem(DEBUG_LOG_KEY);
+  if (saved) debugLogBuffer = JSON.parse(saved);
+} catch {}
+
+function debugLog(category, message, extras) {
+  const ts = new Date().toISOString();
+  const entry = { ts, category, message };
+  if (extras) entry.extras = extras;
+  debugLogBuffer.push(entry);
+  if (debugLogBuffer.length > DEBUG_LOG_MAX) {
+    debugLogBuffer = debugLogBuffer.slice(-DEBUG_LOG_MAX);
+  }
+  try { localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(debugLogBuffer)); } catch {}
+  if (extras) console.log(`[${ts}] [${category}] ${message}`, extras);
+  else console.log(`[${ts}] [${category}] ${message}`);
+}
+
+function audioStateSnapshot() {
+  return {
+    paused: audio.paused,
+    currentTime: Number(audio.currentTime.toFixed(2)),
+    readyState: audio.readyState,
+    networkState: audio.networkState,
+    errorCode: audio.error?.code ?? null,
+    audioCtxState: audioCtx?.state ?? null,
+    online: navigator.onLine,
+    hidden: document.hidden,
+    wantsPlayback,
+    reconnectAttempt,
+  };
+}
+
+function dumpDebugLog() {
+  return debugLogBuffer.map((e) => {
+    const head = `[${e.ts}] [${e.category}] ${e.message}`;
+    return e.extras ? `${head} ${JSON.stringify(e.extras)}` : head;
+  }).join("\n");
+}
 
 function currentStations() {
   const list = stations[currentSource] || [];
@@ -163,9 +213,14 @@ function playSelectedStation() {
     return;
   }
 
+  debugLog("play", "playSelectedStation", { url, station: selectedStationName(), state: audioStateSnapshot() });
   wantsPlayback = true;
+  reconnectAttempt = 0;
   clearReconnect();
   initVisualizer();
+  if (audioCtx?.state === "suspended") {
+    audioCtx.resume().catch((err) => debugLog("audioctx", "resume failed", { error: String(err) }));
+  }
   if (!prepareStream(url)) return;
   setStatus("Loading: " + selectedStationName(), "loading");
   updatePlayPauseButton();
@@ -178,9 +233,11 @@ function playSelectedStation() {
       updatePlayPauseButton();
       emitPlayerState();
       savePreferences();
+      debugLog("play", "play() resolved");
     })
     .catch((error) => {
       console.error("Play error:", error);
+      debugLog("play", "play() rejected", { error: String(error), state: audioStateSnapshot() });
       setStatus("Playback blocked or stream failed: " + selectedStationName(), "error");
       scheduleReconnect("play-error");
     });
@@ -189,12 +246,18 @@ function playSelectedStation() {
 function prepareStream(url, forceReload = false) {
   if (!forceReload && currentStreamUrl === url) return true;
 
+  debugLog("stream", "prepareStream", { url, forceReload, prevError: audio.error?.code ?? null });
   currentStreamUrl = url;
 
   if (hls) {
     hls.destroy();
     hls = null;
   }
+
+  // Hard reset audio element to clear any sticky error/network state from previous stream
+  try { audio.pause(); } catch (e) { debugLog("stream", "pause threw", { error: String(e) }); }
+  audio.removeAttribute("src");
+  try { audio.load(); } catch (e) { debugLog("stream", "load threw", { error: String(e) }); }
 
   const isHlsStream = url.toLowerCase().includes(".m3u8");
   if (Hls.isSupported() && isHlsStream) {
@@ -205,6 +268,7 @@ function prepareStream(url, forceReload = false) {
     });
     hls.on(Hls.Events.ERROR, (_event, data) => {
       console.warn("HLS error:", data);
+      debugLog("hls", "error", { type: data.type, details: data.details, fatal: data.fatal });
       if (data.fatal) scheduleReconnect("hls-error");
     });
     hls.loadSource(url);
@@ -520,78 +584,162 @@ listen("stations-updated", () => {
 
 audio.addEventListener("playing", () => {
   reconnectAttempt = 0;
+  lastProgressAt = Date.now();
+  lastProgressTime = audio.currentTime;
   setStatus("Now Playing: " + selectedStationName(), "playing");
   updatePlayPauseButton();
   emitPlayerState();
+  debugLog("audio", "playing");
 });
 
 audio.addEventListener("pause", () => {
   updatePlayPauseButton();
   emitPlayerState();
+  debugLog("audio", "pause", { wantsPlayback });
 });
 audio.addEventListener("ended", () => {
+  debugLog("audio", "ended", { wantsPlayback });
   if (wantsPlayback) scheduleReconnect("ended");
 });
 audio.addEventListener("error", () => {
+  debugLog("audio", "error", { errorCode: audio.error?.code ?? null, state: audioStateSnapshot() });
   if (wantsPlayback) {
     setStatus("Stream error: " + selectedStationName(), "error");
     scheduleReconnect("audio-error");
   }
 });
 audio.addEventListener("stalled", () => {
+  debugLog("audio", "stalled", { wantsPlayback, state: audioStateSnapshot() });
   if (wantsPlayback) {
     setStatus("Stream stalled: " + selectedStationName(), "loading");
     scheduleReconnect("stalled");
   }
 });
 audio.addEventListener("waiting", () => {
+  debugLog("audio", "waiting", { wantsPlayback, online: navigator.onLine });
   if (wantsPlayback) setStatus("Buffering: " + selectedStationName(), "loading");
   if (wantsPlayback && !navigator.onLine) scheduleReconnect("offline-waiting");
 });
 
 window.addEventListener("offline", () => {
+  debugLog("network", "offline", { wantsPlayback });
   if (!wantsPlayback) return;
   setStatus("Offline. Reconnecting when internet returns...", "offline");
   scheduleReconnect("offline");
 });
 
 window.addEventListener("online", () => {
+  debugLog("network", "online", { wantsPlayback });
   if (!wantsPlayback) return;
   reconnectAttempt = 0;
   reconnectNow("online");
 });
 
+document.addEventListener("visibilitychange", () => {
+  debugLog("visibility", document.hidden ? "hidden" : "visible", { state: audioStateSnapshot() });
+  if (document.hidden) return;
+  if (audioCtx?.state === "suspended") {
+    audioCtx.resume().catch((err) => debugLog("audioctx", "resume failed on visible", { error: String(err) }));
+  }
+  if (wantsPlayback && audio.paused) {
+    debugLog("visibility", "wantsPlayback+paused → reconnect");
+    reconnectAttempt = 0;
+    reconnectNow("visibility-change");
+  }
+});
+
+window.addEventListener("focus", () => {
+  if (audioCtx?.state === "suspended") {
+    audioCtx.resume().catch((err) => debugLog("audioctx", "resume failed on focus", { error: String(err) }));
+  }
+});
+
+watchdogTimer = setInterval(() => {
+  if (!wantsPlayback || audio.paused) {
+    lastProgressAt = Date.now();
+    lastProgressTime = audio.currentTime;
+    return;
+  }
+  const now = Date.now();
+  if (Math.abs(audio.currentTime - lastProgressTime) > 0.05) {
+    lastProgressAt = now;
+    lastProgressTime = audio.currentTime;
+    return;
+  }
+  if (now - lastProgressAt >= STUCK_THRESHOLD_MS) {
+    debugLog("watchdog", "stuck — currentTime not progressing", {
+      stuckForMs: now - lastProgressAt,
+      state: audioStateSnapshot(),
+    });
+    lastProgressAt = now;
+    lastProgressTime = audio.currentTime;
+    scheduleReconnect("watchdog-stuck");
+  }
+}, WATCHDOG_INTERVAL_MS);
+
 function scheduleReconnect(reason) {
   if (!wantsPlayback) return;
-  clearTimeout(reconnectTimer);
+  if (reconnectInFlight) {
+    debugLog("reconnect", "skip schedule — already in flight", { reason });
+    return;
+  }
+  if (reconnectTimer) {
+    debugLog("reconnect", "skip schedule — already scheduled", { reason });
+    return;
+  }
 
-  const delay = navigator.onLine
-    ? Math.min(15000, 1000 * 2 ** Math.min(reconnectAttempt, 4))
-    : 3000;
+  let delay;
+  if (!navigator.onLine) delay = 3000;
+  else if (reconnectAttempt < 5) delay = 1000 * 2 ** reconnectAttempt;
+  else if (reconnectAttempt < 15) delay = 15000;
+  else delay = 30000;
   reconnectAttempt += 1;
+  debugLog("reconnect", "scheduled", { reason, delay, attempt: reconnectAttempt, state: audioStateSnapshot() });
   setStatus(navigator.onLine
     ? `Reconnecting... (${reason})`
     : "Offline. Waiting for connection...", navigator.onLine ? "loading" : "offline");
 
-  reconnectTimer = setTimeout(() => reconnectNow(reason), delay);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    reconnectNow(reason);
+  }, delay);
 }
 
 function reconnectNow(reason) {
   if (!wantsPlayback) return;
+  if (reconnectInFlight) {
+    debugLog("reconnect", "reconnectNow skipped — already in flight", { reason });
+    return;
+  }
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+
   const url = selectedStation()?.url;
   if (!url) return;
 
+  reconnectInFlight = true;
   console.info("Reconnecting stream:", reason);
-  if (!prepareStream(url, true)) return;
+  debugLog("reconnect", "reconnectNow", { reason, url, state: audioStateSnapshot() });
+  if (audioCtx?.state === "suspended") {
+    audioCtx.resume().catch((err) => debugLog("audioctx", "resume failed in reconnect", { error: String(err) }));
+  }
+  if (!prepareStream(url, true)) {
+    reconnectInFlight = false;
+    return;
+  }
   audio.play()
     .then(() => {
+      reconnectInFlight = false;
       reconnectAttempt = 0;
       setStatus("Now Playing: " + selectedStationName(), "playing");
       updatePlayPauseButton();
       emitPlayerState();
+      debugLog("reconnect", "reconnect play() resolved");
     })
     .catch((error) => {
+      reconnectInFlight = false;
       console.warn("Reconnect failed:", error);
+      debugLog("reconnect", "reconnect play() rejected", { error: String(error), state: audioStateSnapshot() });
       scheduleReconnect("retry-failed");
     });
 }
@@ -599,6 +747,7 @@ function reconnectNow(reason) {
 function clearReconnect() {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  reconnectInFlight = false;
 }
 
 function applyInitialPreferences() {
@@ -621,6 +770,26 @@ function applyInitialPreferences() {
 }
 
 document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey && event.shiftKey && (event.key === "L" || event.key === "l")) {
+    event.preventDefault();
+    const text = dumpDebugLog();
+    navigator.clipboard.writeText(text)
+      .then(() => setStatus(`Log copied (${debugLogBuffer.length} entries)`, "idle"))
+      .catch((err) => {
+        console.error("clipboard write failed:", err);
+        console.log("=== DEBUG LOG DUMP ===\n" + text);
+        setStatus("Log dumped to console", "idle");
+      });
+    return;
+  }
+  if (event.ctrlKey && event.shiftKey && (event.key === "K" || event.key === "k")) {
+    event.preventDefault();
+    debugLogBuffer = [];
+    try { localStorage.removeItem(DEBUG_LOG_KEY); } catch {}
+    setStatus("Debug log cleared", "idle");
+    return;
+  }
+
   if (event.target.closest("input, textarea, select")) return;
 
   if (event.key === " ") {
@@ -653,3 +822,4 @@ loadStations();
 updateVolumePercent();
 updatePlayPauseButton();
 window.dispatchEvent(new Event("resize"));
+debugLog("session", "app started", { version: __APP_VERSION__, userAgent: navigator.userAgent });

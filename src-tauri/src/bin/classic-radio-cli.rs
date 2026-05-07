@@ -9,10 +9,11 @@ use std::{
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const STATIONS_JSON: &str = include_str!("../../resources/stations.json");
@@ -29,6 +30,9 @@ const ANIM_FRAMES: &[&str] = &[
 ];
 const ANIM_INTERVAL_MS: u64 = 110;
 const MPV_STDERR_TAIL_BYTES: usize = 12 * 1024;
+const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(15);
+const RECONNECT_MAX_ATTEMPTS: u32 = 10;
 
 const CLEAR: &str = "\x1b[2J\x1b[H";
 const ENTER_ALT_SCREEN: &str = "\x1b[?1049h\x1b[?1007l\x1b[H\x1b[?25h";
@@ -203,6 +207,14 @@ impl Player {
         Ok(())
     }
 
+    fn poll_exit(&mut self) -> Option<String> {
+        match self.child.as_mut()?.try_wait() {
+            Ok(Some(status)) => Some(self.handle_mpv_exit(status)),
+            Ok(None) => None,
+            Err(error) => Some(format!("Gagal memeriksa status mpv: {error}")),
+        }
+    }
+
     fn handle_mpv_exit(&mut self, status: ExitStatus) -> String {
         self.child = None;
         self.join_stderr_reader();
@@ -305,6 +317,28 @@ fn spawn_stderr_reader(
     })
 }
 
+fn spawn_input_reader() -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || loop {
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if tx.send(input).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    rx
+}
+
+fn reconnect_delay(attempt: u32) -> Duration {
+    let exponent = attempt.saturating_sub(1).min(4);
+    let secs = 2u64.pow(exponent).min(RECONNECT_MAX_DELAY.as_secs());
+    Duration::from_secs(secs)
+}
+
 impl Drop for Player {
     fn drop(&mut self) {
         self.stop();
@@ -360,6 +394,9 @@ struct CliApp {
     message: Option<(String, MessageKind)>,
     spinner: Option<Spinner>,
     output_lock: Arc<Mutex<()>>,
+    reconnect_attempt: u32,
+    reconnect_due: Option<Instant>,
+    suppress_render_once: bool,
 }
 
 enum MessageKind {
@@ -382,6 +419,9 @@ impl CliApp {
             message: None,
             spinner: None,
             output_lock: Arc::new(Mutex::new(())),
+            reconnect_attempt: 0,
+            reconnect_due: None,
+            suppress_render_once: false,
         };
         app.apply_filter();
         app
@@ -395,17 +435,28 @@ impl CliApp {
             );
         }
 
+        let input_rx = spawn_input_reader();
+        self.render();
+
         loop {
-            self.render();
-
-            let mut input = String::new();
-            if io::stdin().read_line(&mut input).is_err() {
-                break;
-            }
-
-            let input = input.trim();
-            if !self.handle_command(input) {
-                break;
+            match input_rx.recv_timeout(PLAYBACK_POLL_INTERVAL) {
+                Ok(input) => {
+                    let input = input.trim();
+                    if !self.handle_command(input) {
+                        break;
+                    }
+                    if self.suppress_render_once {
+                        self.suppress_render_once = false;
+                    } else {
+                        self.render();
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if !self.suppress_render_once && self.tick_playback() {
+                        self.render();
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
 
@@ -424,9 +475,11 @@ impl CliApp {
             "q" | "quit" | "exit" => return false,
             "h" | "help" | "?" => {
                 self.show_help();
+                self.suppress_render_once = true;
                 return true;
             }
             "s" | "stop" => {
+                self.clear_reconnect();
                 self.stop_animation();
                 self.player.stop();
                 self.now_playing = None;
@@ -471,10 +524,12 @@ impl CliApp {
                 return true;
             }
             "n" | "next" => {
+                self.clear_reconnect();
                 self.cycle_station(1);
                 return true;
             }
             "b" | "back" | "prev" | "previous" => {
+                self.clear_reconnect();
                 self.cycle_station(-1);
                 return true;
             }
@@ -565,7 +620,15 @@ impl CliApp {
         let now_playing_label = match self.now_playing {
             Some(index) => {
                 let station = &self.stations[index];
-                let (indicator, suffix) = if self.player.paused {
+                let (indicator, suffix) = if self.reconnect_due.is_some() {
+                    (
+                        format!("{YELLOW}↻{RESET}"),
+                        format!(
+                            "{DIM} (reconnecting attempt {}/{}){RESET}",
+                            self.reconnect_attempt, RECONNECT_MAX_ATTEMPTS
+                        ),
+                    )
+                } else if self.player.paused {
                     (
                         format!("{YELLOW}‖{RESET}"),
                         format!("{DIM} (paused){RESET}"),
@@ -745,6 +808,7 @@ impl CliApp {
         }
 
         let station_index = page[number - 1];
+        self.clear_reconnect();
         self.play_station(station_index);
     }
 
@@ -754,11 +818,13 @@ impl CliApp {
         match self.player.play(&station) {
             Ok(()) => {
                 self.now_playing = Some(station_index);
+                self.clear_reconnect();
                 self.set_message(&format!("Playing: {}", station.name), MessageKind::Success);
                 self.start_animation();
             }
             Err(error) => {
                 self.now_playing = None;
+                self.clear_reconnect();
                 self.set_message(
                     &format!("Gagal menjalankan mpv: {error}. Install: sudo apt install mpv"),
                     MessageKind::Error,
@@ -809,6 +875,89 @@ impl CliApp {
         self.play_station(station_index);
     }
 
+    fn tick_playback(&mut self) -> bool {
+        if let Some(due) = self.reconnect_due {
+            if Instant::now() >= due {
+                self.reconnect_now();
+                return true;
+            }
+            return false;
+        }
+
+        if self.now_playing.is_some() {
+            if let Some(error) = self.player.poll_exit() {
+                self.stop_animation();
+                self.schedule_reconnect(&error);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn schedule_reconnect(&mut self, reason: &str) {
+        let Some(index) = self.now_playing else {
+            return;
+        };
+
+        if self.reconnect_attempt >= RECONNECT_MAX_ATTEMPTS {
+            let station_name = self.stations[index].name.clone();
+            let reason = truncate(reason, 240);
+            self.now_playing = None;
+            self.clear_reconnect();
+            self.set_message(
+                &format!(
+                    "Reconnect gagal untuk {station_name} setelah {RECONNECT_MAX_ATTEMPTS} percobaan. Terakhir: {reason}"
+                ),
+                MessageKind::Error,
+            );
+            return;
+        }
+
+        self.reconnect_attempt += 1;
+        let delay = reconnect_delay(self.reconnect_attempt);
+        self.reconnect_due = Some(Instant::now() + delay);
+        let reason = truncate(reason, 240);
+        self.set_message(
+            &format!(
+                "Stream terputus. Reconnecting attempt {}/{} dalam {}s. Terakhir: {}",
+                self.reconnect_attempt,
+                RECONNECT_MAX_ATTEMPTS,
+                delay.as_secs(),
+                reason
+            ),
+            MessageKind::Warning,
+        );
+    }
+
+    fn reconnect_now(&mut self) {
+        self.reconnect_due = None;
+        let Some(index) = self.now_playing else {
+            self.clear_reconnect();
+            return;
+        };
+
+        let station = self.stations[index].clone();
+        match self.player.play(&station) {
+            Ok(()) => {
+                self.set_message(
+                    &format!("Reconnected: {}", station.name),
+                    MessageKind::Success,
+                );
+                self.start_animation();
+            }
+            Err(error) => {
+                self.stop_animation();
+                self.schedule_reconnect(&format!("Gagal menjalankan mpv: {error}"));
+            }
+        }
+    }
+
+    fn clear_reconnect(&mut self) {
+        self.reconnect_attempt = 0;
+        self.reconnect_due = None;
+    }
+
     fn adjust_volume_message(&mut self, delta: i32) {
         match self.player.adjust_volume(delta) {
             Ok(()) => self.set_message(
@@ -854,8 +1003,6 @@ impl CliApp {
         println!();
         println!("{DIM}Tekan Enter untuk kembali ke daftar stasiun...{RESET}");
         let _ = io::stdout().flush();
-        let mut buffer = String::new();
-        let _ = io::stdin().read_line(&mut buffer);
     }
 }
 
